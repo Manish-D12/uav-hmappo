@@ -1,0 +1,20 @@
+# Core RL environment API
+gymnasium>=0.29
+
+# Numerics / deep learning
+numpy>=1.26
+torch>=2.2
+
+# Data handling and baselines
+pandas>=2.0
+scikit-learn>=1.4
+
+# Plotting and configuration
+matplotlib>=3.8
+pyyaml>=6.0
+
+# Interactive demo (scripts/demo.py)
+streamlit>=1.50
+
+# Testing
+pytest>=8.0

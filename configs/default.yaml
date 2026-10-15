@@ -1,0 +1,177 @@
+# Default configuration for hierarchical MAPPO on the UAV network task.
+#
+# Sections map onto dataclasses:
+#   env          -> envs.uav_env.UAVEnvConfig
+#   mappo        -> agents.mappo.MAPPOConfig        (flat agent)
+#   high_level   -> agents.mappo.MAPPOConfig        (hierarchical high level)
+#   low_level    -> agents.mappo.MAPPOConfig        (hierarchical low level)
+#   hierarchical -> agents.hierarchical.HierarchicalMAPPO
+#   train        -> scripts/train.py
+#
+# Unknown keys inside a section are ignored, so it is safe to leave notes here.
+
+# --------------------------------------------------------------------------
+# Environment / scenario
+# --------------------------------------------------------------------------
+env:
+  # scenario geometry
+  n_uav: 3
+  n_users: 20
+  area_size_m: 1000.0
+  altitude_m: 100.0
+  max_speed_mps: 20.0
+  dt_s: 1.0
+
+  # radio
+  # NOTE: YAML 1.1 only reads an exponent as a number when the sign is
+  # explicit. Write 2.0e+9, never 2.0e9 - the latter silently becomes a string.
+  carrier_hz: 2.0e+9
+  bandwidth_hz: 20.0e+6       # total band, fully reused by every UAV
+  tx_power_max_dbm: 30.0
+  tx_power_min_dbm: 10.0
+  noise_figure_db: 7.0
+  antenna_gain_db: 0.0
+  environment: urban          # suburban | urban | dense_urban | high_rise
+  min_rate_bps: 1.0e+6        # QoS threshold defining "covered"
+
+  # energy
+  initial_energy_j: 300000.0
+  hover_power_w: 150.0
+  move_power_coeff: 0.5
+
+  # reward weights
+  w_throughput: 1.0
+  w_coverage: 1.0
+  w_energy: 0.2
+  w_waste: 0.2
+  rate_norm_bps: 10.0e+6      # per-user rate that scores 1.0
+  # Potential-based shaping on mean user-to-nearest-UAV distance (see
+  # UAVEnvConfig).  Penalises overshooting past a cluster on the step it
+  # happens: a full-speed move away from the users costs up to ~0.2.
+  w_shaping: 0.0              # 10.0 was tried; it did not help coverage
+  shaping_gamma: 0.99         # = mappo.gamma
+
+  # episode
+  max_steps: 200
+  user_mobility_mps: 0.0      # > 0 makes users drift each step
+  # Half the training episodes start with the UAVs scattered over the area
+  # rather than bunched at the centre, so the policy also learns to come
+  # back and stop over its users instead of always flying outwards.  The
+  # fixed eval benchmark pins uav_xy and is unaffected.
+  random_uav_start_prob: 0.5
+
+# --------------------------------------------------------------------------
+# PPO hyperparameters
+#
+# Used for the flat agent.
+# --------------------------------------------------------------------------
+mappo:
+  hidden_dim: 128
+  lr_actor: 3.0e-4
+  lr_critic: 1.0e-3
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  # Value clipping is absolute: V may move at most this far per update.  With
+  # returns in the tens, 0.2 froze the critic far below its targets, so the
+  # "advantage" was mostly reward-to-go - i.e. early steps looked good and
+  # late steps bad regardless of the action.  Disabled.
+  value_clip_range: 0.0
+  # The entropy bonus is summed over ~43 action dims per UAV, and Adam turns
+  # that small constant gradient on log_std into full-size steps: at 0.01 the
+  # policy got *noisier* every update (entropy 35 -> 43 over the old run).
+  entropy_coef: 0.001
+  # Per-step reward is O(1) and gamma = 0.99, so raw returns are O(100).
+  # Scaling by 0.1 keeps the critic's targets O(10).
+  reward_scale: 0.1
+  value_loss_coef: 0.5
+  max_grad_norm: 0.5
+  # 10 epochs x 64-step minibatches gave ~130 gradient steps per batch and
+  # clip fractions of ~33% (PPO is meant to sit around 10-20%).
+  ppo_epochs: 5
+  minibatch_size: 128
+  init_log_std: -0.5
+  device: cpu
+
+# --------------------------------------------------------------------------
+# High level of the hierarchical agent (movement + clustering)
+#
+# It decides once per `interval` steps, so an update batch holds only
+# update_every * max_steps / interval = 80 transitions.  With the flat agent's
+# 128-sample minibatches that was a single gradient step per epoch and the
+# policy barely moved (KL ~ 0, clip fraction 0).  Smaller minibatches and more
+# epochs give it ~30 steps per update.
+# --------------------------------------------------------------------------
+high_level:
+  hidden_dim: 128
+  # 3e-4 ran at ~30% clip fraction and eval coverage dropped 58% -> 47%
+  # between episodes 400 and 450 of a 500-episode run.
+  lr_actor: 1.0e-4
+  lr_critic: 1.0e-3
+  gae_lambda: 0.95
+  clip_range: 0.2
+  value_clip_range: 0.0
+  entropy_coef: 0.001
+  reward_scale: 0.1
+  value_loss_coef: 0.5
+  max_grad_norm: 0.5
+  ppo_epochs: 10
+  minibatch_size: 32
+  init_log_std: -0.5
+  device: cpu
+
+# --------------------------------------------------------------------------
+# Low level of the hierarchical agent (resource allocation)
+#
+# Its action space is wider than the high level's, so it gets a slightly larger
+# entropy bonus, and a slightly lower learning rate for stability.
+# --------------------------------------------------------------------------
+low_level:
+  hidden_dim: 128
+  lr_actor: 2.0e-4
+  lr_critic: 1.0e-3
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  value_clip_range: 0.0
+  entropy_coef: 0.002
+  reward_scale: 0.1
+  value_loss_coef: 0.5
+  max_grad_norm: 0.5
+  ppo_epochs: 5
+  minibatch_size: 128
+  init_log_std: -0.5
+  device: cpu
+
+# --------------------------------------------------------------------------
+# Hierarchy
+# --------------------------------------------------------------------------
+hierarchical:
+  enabled: true
+  interval: 5                 # env steps a high-level decision is held for
+  # One high-level transition spans `interval` env steps, so its discount is
+  # the per-step gamma raised to that power: 0.99 ** 5 ~= 0.951.
+  high_gamma: 0.951
+
+# --------------------------------------------------------------------------
+# Training loop
+# --------------------------------------------------------------------------
+train:
+  episodes: 500
+  update_every: 2             # run a PPO update after this many episodes (400 steps)
+  seed: 0
+  eval_every: 50              # episodes between greedy evaluation rollouts
+  eval_episodes: 5            # scenarios used for the quick periodic eval
+  log_dir: results
+  save_model: true
+
+# --------------------------------------------------------------------------
+# Fixed evaluation benchmark
+#
+# Generated once and reused by every method, so MAPPO and K-means are always
+# scored on identical user layouts. Delete the file to regenerate it.
+# --------------------------------------------------------------------------
+eval:
+  n_scenarios: 50
+  path: results/eval_scenarios.npz
+  seed: 12345                 # distinct from train.seed on purpose
