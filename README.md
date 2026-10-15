@@ -12,7 +12,7 @@ baseline on a fixed benchmark of 50 user layouts.
 
 - R. Neelakesav
 - B. Preetham
-- D. Manish
+- D. Manish Sesha Sai 
 
 **Guide:** Dr. Vinnakota Venu Balaji
 
