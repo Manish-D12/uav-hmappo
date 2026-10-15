@@ -79,7 +79,7 @@ at least 1 Mbps.
 | Method | Coverage | Avg rate (Mbps) | Total throughput (Mbps) | Jain fairness | Energy eff. (kbit/J) | Spectral eff. (bps/Hz) | Return |
 |---|---|---|---|---|---|---|---|
 | K-means | 90.3% ± 5.8% | 9.59 | 191.7 | 0.563 | 380.7 | 3.20 | 284.6 |
-| Flat MAPPO | 89.8% ± 14.9% | 4.49 | 89.8 | 0.278 | 146.9 | 1.54 | 128.6 |
+| Flat MAPPO | 59.8% ± 14.9% | 4.49 | 89.8 | 0.278 | 146.9 | 1.54 | 128.6 |
 | Hierarchical MAPPO | 70.3% ± 8.5% | 5.35 | 107.0 | 0.278 | 177.1 | 1.79 | 153.9 |
 
 Hierarchical MAPPO outperforms flat MAPPO on coverage, throughput and energy
